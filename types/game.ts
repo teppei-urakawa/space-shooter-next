@@ -118,5 +118,15 @@ export interface HudState {
   activeItems: ActiveItems;
 }
 
-export type Screen = 'title' | 'color' | 'difficulty' | 'game' | 'ranking';
+export type Screen = 'title' | 'color' | 'difficulty' | 'game' | 'ranking' | 'auth';
 export type Difficulty = 'easy' | 'normal' | 'hard';
+
+export interface GlobalRankRecord {
+  id: string;
+  username: string;
+  score: number;
+  color_hex: string;
+  color_label: string;
+  difficulty: string;
+  played_at: string;
+}
