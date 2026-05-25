@@ -551,6 +551,17 @@ export class GameController {
     this.soundManager.stopBgm();
     this.soundManager.playGameOver();
     saveScore(s.score, this.selectedColor.id, this.selectedDiff);
+    fetch('/api/scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        score:      s.score,
+        colorId:    this.selectedColor.id,
+        colorHex:   this.selectedColor.hex,
+        colorLabel: this.selectedColor.label,
+        difficulty: this.selectedDiff,
+      }),
+    }).catch(() => {});
     this.onGameOver?.(s.score);
   }
 
