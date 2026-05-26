@@ -4,6 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'GALACTIC STRIKER',
   description: '宇宙人の侵略を阻止せよ',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
