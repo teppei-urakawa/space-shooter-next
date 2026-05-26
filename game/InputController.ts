@@ -1,5 +1,5 @@
 interface InputCallbacks {
-  onMove: (x: number) => void;
+  onMove: (x: number, y: number) => void;
   onDown: () => void;
   onUp: () => void;
 }
@@ -25,18 +25,18 @@ export class InputController {
       mouseleave: () => onUp(),
       mousemove: (e: MouseEvent) => {
         const rect = canvas.getBoundingClientRect();
-        onMove(e.clientX - rect.left);
+        onMove(e.clientX - rect.left, e.clientY - rect.top);
       },
       touchstart: (e: TouchEvent) => {
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
-        onMove(e.touches[0].clientX - rect.left);
+        onMove(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
         onDown();
       },
       touchmove: (e: TouchEvent) => {
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
-        onMove(e.touches[0].clientX - rect.left);
+        onMove(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
       },
       touchend: () => onUp(),
     };

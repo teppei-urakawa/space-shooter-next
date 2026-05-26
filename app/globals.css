@@ -600,6 +600,31 @@ body {
   50% { opacity: 0.7; }
 }
 
+/* 認証フォーム */
+.auth-input {
+  background: rgba(0, 245, 255, 0.04);
+  border: 1px solid var(--border-glow);
+  color: #fff;
+  font-family: var(--font-main);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  padding: 12px 16px;
+  width: 100%;
+  outline: none;
+  clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.auth-input::placeholder {
+  color: rgba(255, 255, 255, 0.25);
+  letter-spacing: 0.15em;
+}
+
+.auth-input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 245, 255, 0.2), inset 0 0 8px rgba(0, 245, 255, 0.05);
+}
+
 /* レスポンシブ */
 @media (max-width: 500px) {
   .select-content, .ranking-content { min-width: unset; padding: 24px 20px; }

@@ -14,6 +14,7 @@ interface GameScreenProps {
 const INITIAL_HUD: HudState = {
   score: 0,
   level: 1,
+  stage: 1,
   lives: 3,
   activeItems: { twin: 0, spread: 0, rapid: 0, shield: false, laser: 0, freeze: 0 },
 };

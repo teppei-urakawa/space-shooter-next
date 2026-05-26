@@ -36,8 +36,8 @@ export default function HudOverlay({
           <span className="hud-value">{hud.score.toLocaleString()}</span>
         </div>
         <div className="hud-center">
-          <span className="hud-label">LEVEL</span>
-          <span className="hud-value">{hud.level}</span>
+          <span className="hud-label">STAGE</span>
+          <span className="hud-value">{hud.stage}</span>
         </div>
         <div className="hud-right">
           <span className="hud-label">LIFE</span>

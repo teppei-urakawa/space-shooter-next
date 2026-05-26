@@ -30,6 +30,7 @@ export interface Player {
   x: number;
   y: number;
   targetX: number;
+  targetY: number;
   w: number;
   h: number;
   color: string;
@@ -114,6 +115,7 @@ export interface DiffConfig {
 export interface HudState {
   score: number;
   level: number;
+  stage: number;
   lives: number;
   activeItems: ActiveItems;
 }

@@ -23,6 +23,7 @@ interface GameState {
   starField: StarField | null;
   score: number;
   level: number;
+  stage: number;
   frameCount: number;
   lives: number;
   gameRunning: boolean;
@@ -68,7 +69,7 @@ export class GameController {
       player: null,
       bullets: [], alienBullets: [], aliens: [],
       particles: [], powerupItems: [], starField: null,
-      score: 0, level: 1, frameCount: 0, lives: 3,
+      score: 0, level: 1, stage: 1, frameCount: 0, lives: 3,
       gameRunning: false, paused: false, mouseIsDown: false,
       screenFlash: { alpha: 0, color: '#ffffff', decay: 0.04 },
       bossWarning: { text: '', frames: 0, color: '#ff4400' },
@@ -88,7 +89,7 @@ export class GameController {
     s.diffConfig = DIFFICULTY[this.selectedDiff];
     s.player = {
       x: canvas.width / 2, y: canvas.height - 80,
-      targetX: canvas.width / 2,
+      targetX: canvas.width / 2, targetY: canvas.height - 80,
       w: 72, h: 80,
       color: this.selectedColor.hex,
       glow:  this.selectedColor.glow,
@@ -120,7 +121,11 @@ export class GameController {
     // 入力コントローラーを設定
     if (this.inputController) this.inputController.destroy();
     this.inputController = new InputController(this.canvas, {
-      onMove: x => { if (this.state.player) this.state.player.targetX = x; },
+      onMove: (x, y) => {
+        if (!this.state.player) return;
+        this.state.player.targetX = x;
+        this.state.player.targetY = y;
+      },
       onDown: () => {},
       onUp:   () => {},
     });
@@ -173,7 +178,11 @@ export class GameController {
 
     const p = s.player!;
     p.x += (p.targetX - p.x) * 0.12;
-    p.x = Math.max(p.w / 2, Math.min(canvas.width - p.w / 2, p.x));
+    p.x  = Math.max(p.w / 2, Math.min(canvas.width  - p.w / 2, p.x));
+    const yMin = canvas.height * 0.40;
+    const yMax = canvas.height - p.h / 2;
+    p.y += (Math.max(yMin, Math.min(yMax, p.targetY)) - p.y) * 0.12;
+    p.y  = Math.max(yMin, Math.min(yMax, p.y));
     if (p.invincible    > 0) p.invincible--;
     if (p.shootCooldown > 0) p.shootCooldown--;
 
@@ -344,7 +353,8 @@ export class GameController {
       cx:    tDef.w / 2 + Math.random() * (canvas.width - tDef.w),
       cy:    -tDef.h / 2,
       w: tDef.w, h: tDef.h,
-      hp: tDef.hp, maxHp: tDef.hp,
+      hp: isBoss ? Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)) : tDef.hp,
+      maxHp: isBoss ? Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)) : tDef.hp,
       score: tDef.score,
       color: tDef.color, glow: tDef.glow, label: tDef.label,
       speed: tDef.speedBase * s.diffConfig!.speedMult * (1 + s.level * 0.08),
@@ -384,6 +394,77 @@ export class GameController {
       case 'boss_easy': this._updateBossEasy(a);   break;
       case 'boss':      this._updateBossNormal(a); break;
       case 'boss_hard': this._updateBossHard(a);   break;
+    }
+    if (!a.type.startsWith('boss')) this._shootNormalAlien(a);
+  }
+
+  // ── 通常敵の攻撃パターン（レベル連動） ────────────────────────
+  // 各敵タイプごとに攻撃開始レベル・弾パターンが異なる
+  private _shootNormalAlien(a: Alien) {
+    const { state: s } = this;
+    const st = s.stage;
+    a.shootTimer++;
+
+    switch (a.type) {
+      // drone: 真下単発(st2) → 3方向拡散(st4)
+      case 'drone': {
+        if (st < 2) break;
+        const interval = Math.max(90 - st * 8, 28);
+        if (a.shootTimer % interval !== 0) break;
+        if (st >= 4) {
+          for (const off of [-0.3, 0, 0.3])
+            s.alienBullets.push({ x: a.cx, y: a.cy + a.h / 2, vx: Math.sin(off) * 2.5, vy: 2.5, color: a.color });
+        } else {
+          s.alienBullets.push({ x: a.cx, y: a.cy + a.h / 2, vx: 0, vy: 3, color: a.color });
+        }
+        break;
+      }
+      // zigzag: 狙い単発(st1) → 2方向狙い撃ち(st3)
+      case 'zigzag': {
+        if (st < 1) break;
+        const interval = Math.max(100 - st * 9, 30);
+        if (a.shootTimer % interval !== 0) break;
+        const ang = Math.atan2(s.player!.y - a.cy, s.player!.x - a.cx);
+        if (st >= 3) {
+          for (const off of [-0.2, 0.2])
+            s.alienBullets.push({ x: a.cx, y: a.cy + a.h / 2, vx: Math.cos(ang + off) * 3, vy: Math.sin(ang + off) * 3, color: a.color });
+        } else {
+          s.alienBullets.push({ x: a.cx, y: a.cy + a.h / 2, vx: Math.cos(ang) * 3, vy: Math.sin(ang) * 3, color: a.color });
+        }
+        break;
+      }
+      // bomber: 左右斜め(st2) → 十字4方向(st5)
+      case 'bomber': {
+        if (st < 2) break;
+        const interval = Math.max(80 - st * 8, 22);
+        if (a.shootTimer % interval !== 0) break;
+        if (st >= 5) {
+          for (const [vx, vy] of [[0, 3.5], [-2.5, 2.5], [2.5, 2.5], [0, -1.5]] as [number, number][])
+            s.alienBullets.push({ x: a.cx, y: a.cy, vx, vy, color: a.color });
+        } else {
+          for (const vx of [-2.5, 2.5])
+            s.alienBullets.push({ x: a.cx, y: a.cy + a.h / 2, vx, vy: 2.5, color: a.color });
+        }
+        break;
+      }
+      // spinner: 回転2方向(st3) → X字4方向(st6)
+      case 'spinner': {
+        if (st < 3) break;
+        const interval = Math.max(70 - st * 7, 18);
+        if (a.shootTimer % interval !== 0) break;
+        if (st >= 6) {
+          for (let i = 0; i < 4; i++) {
+            const ang = a.angle + (i * Math.PI / 2) + Math.PI / 4;
+            s.alienBullets.push({ x: a.cx, y: a.cy, vx: Math.cos(ang) * 3, vy: Math.sin(ang) * 3, color: a.color });
+          }
+        } else {
+          for (const off of [Math.PI / 2, -Math.PI / 2]) {
+            const ang = a.angle + off;
+            s.alienBullets.push({ x: a.cx, y: a.cy, vx: Math.cos(ang) * 2.5, vy: Math.sin(ang) * 2.5, color: a.color });
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -517,7 +598,8 @@ export class GameController {
       this.soundManager.playBossExplosion();
       for (let i = 0; i < 3; i++) this._spawnPowerup(a.cx + (Math.random() - 0.5) * 80, a.cy + (Math.random() - 0.5) * 40);
       s.screenFlash = { alpha: 1.0, color: '#ffffff', decay: 0.028 };
-      s.bossWarning = { text: '★ BOSS DEFEATED ★', frames: 200, color: '#ffd700' };
+      s.stage++;
+      s.bossWarning = { text: `★ STAGE ${s.stage} ★`, frames: 240, color: '#ffd700' };
     } else {
       this.soundManager.playExplosion();
       if (Math.random() < 0.3) this._spawnPowerup(a.cx, a.cy);
@@ -571,6 +653,7 @@ export class GameController {
     this.onHudUpdate?.({
       score: s.score,
       level: s.level,
+      stage: s.stage,
       lives: s.lives,
       activeItems: s.player.activeItems,
     });
