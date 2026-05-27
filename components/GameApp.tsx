@@ -73,8 +73,8 @@ export default function GameApp() {
     <>
       <div className="stars-bg" />
 
-      {/* ログイン状態バッジ（ゲーム中は非表示） */}
-      <div style={{ position: 'fixed', top: '12px', right: '16px', zIndex: 100, display: screen === 'game' ? 'none' : 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* ログイン状態バッジ（ゲーム中・ゲームオーバー中は非表示） */}
+      <div style={{ position: 'fixed', top: '12px', right: '16px', zIndex: 100, display: (screen === 'game' || showGameOver) ? 'none' : 'flex', alignItems: 'center', gap: '8px' }}>
         {user ? (
           <>
             <span style={{ color: '#00f5ff', fontSize: '0.7rem', fontFamily: 'Orbitron, sans-serif' }}>
