@@ -11,8 +11,6 @@ import type {
 } from '@/types/game';
 import type { SoundManager } from './SoundManager';
 
-const ALIEN_POOL = ['drone', 'drone', 'drone', 'zigzag', 'zigzag', 'bomber', 'spinner'];
-
 interface GameState {
   player: Player | null;
   bullets: Bullet[];
@@ -32,6 +30,11 @@ interface GameState {
   screenFlash: ScreenFlash;
   bossWarning: BossWarning;
   diffConfig: DiffConfig | null;
+  // ステージ管理
+  stageEnemiesSpawned: number;
+  stageEnemiesToSpawn: number;
+  bossSpawned: boolean;
+  stageClearTimer: number;
 }
 
 interface GameControllerOptions {
@@ -46,6 +49,9 @@ export class GameController {
   private inputController: InputController | null = null;
   private rafId: number | null = null;
   private state: GameState;
+  private keysHeld: Set<string> = new Set();
+  private _keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+  private _keyupHandler: ((e: KeyboardEvent) => void) | null = null;
 
   selectedColor: ShipColor = SHIP_COLORS[0];
   selectedDiff  = 'normal';
@@ -74,6 +80,7 @@ export class GameController {
       screenFlash: { alpha: 0, color: '#ffffff', decay: 0.04 },
       bossWarning: { text: '', frames: 0, color: '#ff4400' },
       diffConfig: null,
+      stageEnemiesSpawned: 0, stageEnemiesToSpawn: 0, bossSpawned: false, stageClearTimer: 0,
     };
   }
 
@@ -104,12 +111,17 @@ export class GameController {
     s.starField    = new StarField(canvas);
     s.score        = 0;
     s.level        = 1;
+    s.stage        = 1;
     s.frameCount   = 0;
     s.lives        = 3;
     s.gameRunning  = true;
     s.mouseIsDown  = false;
     s.screenFlash  = { alpha: 0, color: '#ffffff', decay: 0.04 };
     s.bossWarning  = { text: '', frames: 0, color: '#ff4400' };
+    s.stageEnemiesSpawned = 0;
+    s.stageEnemiesToSpawn = this._getStageConfig(1).enemyCount;
+    s.bossSpawned  = false;
+    s.stageClearTimer = 0;
 
     this._notifyHud();
   }
@@ -129,6 +141,21 @@ export class GameController {
       onDown: () => {},
       onUp:   () => {},
     });
+
+    // キーボード入力リスナーを設定
+    this.keysHeld.clear();
+    const MOVE_KEYS = new Set(['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d']);
+    this._keydownHandler = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (MOVE_KEYS.has(k)) { e.preventDefault(); this.keysHeld.add(k); }
+    };
+    this._keyupHandler = (e: KeyboardEvent) => {
+      this.keysHeld.delete(e.key.toLowerCase());
+    };
+    if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
+    if (this._keyupHandler)   window.removeEventListener('keyup',   this._keyupHandler);
+    window.addEventListener('keydown', this._keydownHandler);
+    window.addEventListener('keyup',   this._keyupHandler);
 
     this.rafId = requestAnimationFrame(() => this._loop());
   }
@@ -152,6 +179,8 @@ export class GameController {
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     if (this.inputController) this.inputController.destroy();
+    if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
+    if (this._keyupHandler)   window.removeEventListener('keyup',   this._keyupHandler);
     window.removeEventListener('resize', () => this._resizeCanvas());
   }
 
@@ -177,9 +206,17 @@ export class GameController {
     this._fireBullet();
 
     const p = s.player!;
+
+    // キーボード入力で目標座標を更新 (WASD / 矢印キー)
+    const KSPD = 10;
+    if (this.keysHeld.has('arrowleft')  || this.keysHeld.has('a')) p.targetX -= KSPD;
+    if (this.keysHeld.has('arrowright') || this.keysHeld.has('d')) p.targetX += KSPD;
+    if (this.keysHeld.has('arrowup')    || this.keysHeld.has('w')) p.targetY -= KSPD;
+    if (this.keysHeld.has('arrowdown')  || this.keysHeld.has('s')) p.targetY += KSPD;
+
     p.x += (p.targetX - p.x) * 0.12;
     p.x  = Math.max(p.w / 2, Math.min(canvas.width  - p.w / 2, p.x));
-    const yMin = canvas.height * 0.40;
+    const yMin = 65; // HUD下端分の余白
     const yMax = canvas.height - p.h / 2;
     p.y += (Math.max(yMin, Math.min(yMax, p.targetY)) - p.y) * 0.12;
     p.y  = Math.max(yMin, Math.min(yMax, p.y));
@@ -198,13 +235,25 @@ export class GameController {
     if (s.screenFlash.alpha > 0) s.screenFlash.alpha = Math.max(0, s.screenFlash.alpha - s.screenFlash.decay);
     if (s.bossWarning.frames > 0) s.bossWarning.frames--;
 
-    const newLevel = 1 + Math.floor(s.score / 500);
-    if (newLevel !== s.level) {
-      s.level = newLevel;
-      this._notifyHud();
+    // ステージクリアカウントダウン
+    if (s.stageClearTimer > 0) {
+      s.stageClearTimer--;
+      if (s.stageClearTimer === 0) this._startNextStage();
     }
 
-    if (s.frameCount % Math.max(s.diffConfig!.spawnRate - s.level * 3, 20) === 0) this._spawnAlien();
+    // 敵スポーン
+    if (s.stageClearTimer === 0 && !s.bossSpawned) {
+      if (s.stageEnemiesSpawned >= s.stageEnemiesToSpawn) {
+        // 通常敵を全員倒したらボスを出現
+        if (s.aliens.length === 0) this._spawnBoss();
+      } else {
+        const { spawnRate } = this._getStageConfig(s.stage);
+        if (s.frameCount % spawnRate === 0) {
+          this._spawnRegularAlien();
+          s.stageEnemiesSpawned++;
+        }
+      }
+    }
 
     s.aliens.forEach(a => {
       if (!a.type.startsWith('boss')) return;
@@ -335,37 +384,89 @@ export class GameController {
     }
   }
 
-  // ── 宇宙人スポーン ────────────────────────────────────────
+  // ── ステージ設定 ──────────────────────────────────────────
 
-  private _getBossType() {
-    return this.selectedDiff === 'easy' ? 'boss_easy' : this.selectedDiff === 'hard' ? 'boss_hard' : 'boss';
+  private _getStageConfig(stage: number) {
+    const base = this.state.diffConfig!;
+    const spawnRate   = Math.max(15, base.spawnRate - (stage - 1) * 5);
+    const speedMult   = base.speedMult * (1 + (stage - 1) * 0.12);
+    const hpMult      = 1 + (stage - 1) * 0.20;
+    const enemyCount  = 8 + stage * 3;
+    return { spawnRate, speedMult, hpMult, enemyCount };
   }
 
-  private _spawnAlien() {
+  private _getAlienPool(stage: number): string[] {
+    if (stage <= 1) return ['drone', 'drone', 'drone', 'zigzag', 'zigzag'];
+    if (stage <= 2) return ['drone', 'drone', 'zigzag', 'zigzag', 'bomber'];
+    if (stage <= 3) return ['drone', 'zigzag', 'zigzag', 'bomber', 'spinner'];
+    return ['zigzag', 'bomber', 'bomber', 'spinner', 'spinner'];
+  }
+
+  private _getBossType(): string {
+    const { stage } = this.state;
+    if (this.selectedDiff === 'easy')   return 'boss_easy';
+    if (this.selectedDiff === 'hard')   return stage <= 2 ? 'boss' : 'boss_hard';
+    return stage <= 1 ? 'boss_easy' : 'boss';
+  }
+
+  // ── 宇宙人スポーン ────────────────────────────────────────
+
+  private _spawnRegularAlien() {
     const { state: s, canvas } = this;
-    const bossInterval = s.diffConfig!.spawnRate * 55;
-    const isBoss = s.frameCount > 0 && s.frameCount % bossInterval === 0;
-    const typeId = isBoss ? this._getBossType() : ALIEN_POOL[Math.floor(Math.random() * ALIEN_POOL.length)];
+    const pool   = this._getAlienPool(s.stage);
+    const typeId = pool[Math.floor(Math.random() * pool.length)];
     const tDef   = ALIEN_TYPES.find(t => t.id === typeId)!;
+    const cfg    = this._getStageConfig(s.stage);
 
     s.aliens.push({
       type:  typeId,
       cx:    tDef.w / 2 + Math.random() * (canvas.width - tDef.w),
       cy:    -tDef.h / 2,
       w: tDef.w, h: tDef.h,
-      hp: isBoss ? Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)) : tDef.hp,
-      maxHp: isBoss ? Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)) : tDef.hp,
+      hp:    Math.ceil(tDef.hp * cfg.hpMult),
+      maxHp: Math.ceil(tDef.hp * cfg.hpMult),
       score: tDef.score,
       color: tDef.color, glow: tDef.glow, label: tDef.label,
-      speed: tDef.speedBase * s.diffConfig!.speedMult * (1 + s.level * 0.08),
+      speed: tDef.speedBase * cfg.speedMult,
       phase: Math.random() * Math.PI * 2,
       angle: 0, shootTimer: 0, bossPhase: 1, yPhase: 0, spiralAngle: 0,
     });
+  }
 
-    if (isBoss) {
-      s.bossWarning = { text: `⚠ ${tDef.label} ⚠`, frames: 150, color: tDef.color };
-      s.screenFlash = { alpha: 0.45, color: tDef.color, decay: 0.012 };
-    }
+  private _spawnBoss() {
+    const { state: s, canvas } = this;
+    const typeId = this._getBossType();
+    const tDef   = ALIEN_TYPES.find(t => t.id === typeId)!;
+    const cfg    = this._getStageConfig(s.stage);
+
+    s.aliens.push({
+      type:  typeId,
+      cx:    canvas.width / 2,
+      cy:    -tDef.h / 2,
+      w: tDef.w, h: tDef.h,
+      hp:    Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)),
+      maxHp: Math.ceil(tDef.hp * (1 + (s.stage - 1) * 0.3)),
+      score: tDef.score,
+      color: tDef.color, glow: tDef.glow, label: tDef.label,
+      speed: tDef.speedBase * cfg.speedMult,
+      phase: Math.random() * Math.PI * 2,
+      angle: 0, shootTimer: 0, bossPhase: 1, yPhase: 0, spiralAngle: 0,
+    });
+    s.bossSpawned = true;
+    s.bossWarning = { text: `⚠ ${tDef.label} ⚠`, frames: 150, color: tDef.color };
+    s.screenFlash = { alpha: 0.45, color: tDef.color, decay: 0.012 };
+  }
+
+  private _startNextStage() {
+    const s = this.state;
+    s.stage++;
+    s.level = s.stage;
+    const cfg = this._getStageConfig(s.stage);
+    s.stageEnemiesToSpawn = cfg.enemyCount;
+    s.stageEnemiesSpawned = 0;
+    s.bossSpawned         = false;
+    s.stageClearTimer     = 0;
+    this._notifyHud();
   }
 
   // ── 宇宙人移動ロジック ────────────────────────────────────
@@ -597,9 +698,10 @@ export class GameController {
     if (isBoss) {
       this.soundManager.playBossExplosion();
       for (let i = 0; i < 3; i++) this._spawnPowerup(a.cx + (Math.random() - 0.5) * 80, a.cy + (Math.random() - 0.5) * 40);
-      s.screenFlash = { alpha: 1.0, color: '#ffffff', decay: 0.028 };
-      s.stage++;
-      s.bossWarning = { text: `★ STAGE ${s.stage} ★`, frames: 240, color: '#ffd700' };
+      s.screenFlash   = { alpha: 1.0, color: '#ffffff', decay: 0.028 };
+      s.alienBullets  = [];
+      s.stageClearTimer = 180;
+      s.bossWarning   = { text: `★ STAGE ${s.stage} CLEAR! ★`, frames: 180, color: '#ffd700' };
     } else {
       this.soundManager.playExplosion();
       if (Math.random() < 0.3) this._spawnPowerup(a.cx, a.cy);
@@ -652,7 +754,7 @@ export class GameController {
     if (!s.player) return;
     this.onHudUpdate?.({
       score: s.score,
-      level: s.level,
+      level: s.stage,
       stage: s.stage,
       lives: s.lives,
       activeItems: s.player.activeItems,
